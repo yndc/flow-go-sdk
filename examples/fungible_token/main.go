@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -50,7 +51,8 @@ const (
 )
 
 var (
-	flowAccessAddress = os.Getenv("FLOW_ACCESSADDRESS")
+	flowAccessAddress     = os.Getenv("FLOW_ACCESSADDRESS")
+	numberOfIterationsStr = os.Getenv("ITERATIONS")
 
 	fungibleTokenAddress flow.Address
 	flowTokenAddress     flow.Address
@@ -66,16 +68,28 @@ func main() {
 		// Default to emulator address
 		flowAccessAddress = "127.0.0.1:3569"
 	}
+	numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
+	if numberOfIterations == 0 {
+		numberOfIterations = 1
+	}
+
 	flowRootAccountKey := os.Getenv("FLOW_ROOTPRIVATEKEY")
 	flowClient, err := client.New(flowAccessAddress, grpc.WithInsecure())
 	examples.Handle(err)
 	if len(flowRootAccountKey) == 0 {
+		// Load root account of the emulator, if nothing is passed in
 		rootAcctAddr, rootAcctKey, rootSigner = examples.RootAccount(flowClient)
 	} else {
+		// Otherwise, just load with the Key
 		rootAcctAddr, rootAcctKey, rootSigner = examples.RootAccountWithKey(flowClient, flowRootAccountKey)
 	}
+
+	// Deploy the token contracts
 	DeployFungibleAndFlowTokens()
-	CreateAccountAndTransfer()
+
+	for i := 0; i < numberOfIterations; i++ {
+		CreateAccountAndTransfer()
+	}
 }
 
 func DeployFungibleAndFlowTokens() {
@@ -226,6 +240,7 @@ func CreateAccountAndTransfer() {
 	// Successful Tx, increment sequence number
 	myAcctKey.SequenceNumber++
 
+	// Mint to the new account
 	flowTokenAcc, err := flowClient.GetAccount(context.Background(), flowTokenAddress)
 	examples.Handle(err)
 	flowTokenAccKey := flowTokenAcc.Keys[0]
@@ -235,11 +250,14 @@ func CreateAccountAndTransfer() {
 	fmt.Println(string(mintScript))
 	mintTx := flow.NewTransaction().
 		SetScript(mintScript).
-		SetProposalKey(flowTokenAddress, flowTokenAccKey.ID, flowTokenAccKey.SequenceNumber).
-		SetPayer(flowTokenAddress).
+		SetProposalKey(myAddress, myAcctKey.ID, myAcctKey.SequenceNumber).
+		SetPayer(myAddress).
 		AddAuthorizer(flowTokenAddress)
 
-	err = mintTx.SignEnvelope(flowTokenAddress, flowTokenAccKey.ID, rootSigner)
+	err = mintTx.SignPayload(flowTokenAddress, flowTokenAccKey.ID, rootSigner)
+	examples.Handle(err)
+
+	err = mintTx.SignEnvelope(myAddress, myAcctKey.ID, mySigner)
 	examples.Handle(err)
 
 	err = flowClient.SendTransaction(ctx, *mintTx)
@@ -249,7 +267,7 @@ func CreateAccountAndTransfer() {
 	examples.Handle(mintTxResp.Error)
 
 	// Successful Tx, increment sequence number
-	flowTokenAccKey.SequenceNumber++
+	myAcctKey.SequenceNumber++
 }
 
 func GenerateSetupAccountScript(ftAddr, flowToken flow.Address) []byte {
