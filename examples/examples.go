@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"time"
 
 	"google.golang.org/grpc"
@@ -60,6 +61,21 @@ const defaultRootKeySeed = "elephant ears space cowboy octopus rodeo potato cann
 func RootAccount(flowClient *client.Client) (flow.Address, *flow.AccountKey, crypto.Signer) {
 	privateKey, _ := crypto.GeneratePrivateKey(crypto.ECDSA_P256, []byte(defaultRootKeySeed))
 
+	// root account always has address 0x01
+	addr := flow.HexToAddress("01")
+
+	acc, err := flowClient.GetAccount(context.Background(), addr)
+	Handle(err)
+
+	accountKey := acc.Keys[0]
+
+	signer := crypto.NewInMemorySigner(privateKey, accountKey.HashAlgo)
+
+	return addr, accountKey, signer
+}
+
+func RootAccountWithKey(flowClient *client.Client, key string) (flow.Address, *flow.AccountKey, crypto.Signer) {
+	privateKey, _ := crypto.DecodePrivateKeyHex(crypto.ECDSA_P256, key)
 	// root account always has address 0x01
 	addr := flow.HexToAddress("01")
 
@@ -149,4 +165,17 @@ func WaitForSeal(ctx context.Context, c *client.Client, id flow.Identifier) *flo
 	fmt.Printf("Transaction %s sealed\n", id)
 
 	return result
+}
+
+// DownloadFile will download a url a byte slice
+func DownloadFile(url string) ([]byte, error) {
+
+	// Get the data
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return ioutil.ReadAll(resp.Body)
 }
