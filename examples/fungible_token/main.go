@@ -27,6 +27,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/onflow/cadence"
 	"github.com/onflow/flow-go-sdk"
 	"github.com/onflow/flow-go-sdk/client"
 	"github.com/onflow/flow-go-sdk/crypto"
@@ -44,10 +45,13 @@ const (
 )
 
 const (
+	// More transactions listed here: https://github.com/onflow/flow-ft/tree/master/transactions
 	FungibleTokenTransactionsBaseURL = "https://raw.githubusercontent.com/onflow/flow-ft/master/transactions/"
 
 	SetupAccount = "setup_account.cdc"
 	MintTokens   = "mint_tokens.cdc"
+	GetSupply    = "get_supply.cdc"
+	GetBalance   = "get_balance.cdc"
 )
 
 var (
@@ -56,7 +60,7 @@ var (
 
 	fungibleTokenAddress flow.Address
 	flowTokenAddress     flow.Address
-	myAddress            flow.Address
+	myAddress            flow.Address // Latest created account
 
 	rootAcctAddr flow.Address
 	rootAcctKey  *flow.AccountKey
@@ -69,7 +73,7 @@ func main() {
 		flowAccessAddress = "127.0.0.1:3569"
 	}
 	numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
-	if numberOfIterations == 0 {
+	if len(numberOfIterationsStr) == 0 {
 		numberOfIterations = 1
 	}
 
@@ -84,24 +88,34 @@ func main() {
 		rootAcctAddr, rootAcctKey, rootSigner = examples.RootAccountWithKey(flowClient, flowRootAccountKey)
 	}
 
-	// Deploy the token contracts
-	DeployFungibleAndFlowTokens()
+	existingFungibleTokenAddress := os.Getenv("FLOW_FUNGIBLETOKENADDRESS")
+	if len(existingFungibleTokenAddress) != 0 {
+		fungibleTokenAddress = flow.HexToAddress(existingFungibleTokenAddress)
+	}
+	existingFlowTokenAddress := os.Getenv("FLOW_FLOWTOKENADDRESS")
+	if len(existingFlowTokenAddress) != 0 {
+		flowTokenAddress = flow.HexToAddress(existingFlowTokenAddress)
+	}
+
+	if len(existingFungibleTokenAddress) == 0 || len(existingFlowTokenAddress) == 0 {
+		// Deploy the token contracts
+		DeployFungibleAndFlowTokens(flowClient)
+	}
 
 	for i := 0; i < numberOfIterations; i++ {
-		CreateAccountAndTransfer()
+		CreateAccountAndTransfer(flowClient)
 	}
+
+	GetEvents(flowClient)
+	GetTokenSupply(flowClient)
+	GetAccountBalance(flowClient)
 }
 
-func DeployFungibleAndFlowTokens() {
-	// Connect to an access API (Emulator or Access node)
+func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	ctx := context.Background()
-	flowClient, err := client.New(flowAccessAddress, grpc.WithInsecure())
-	examples.Handle(err)
-
 	// Deploy the FT contract
 	ftCode, err := examples.DownloadFile(FungibleTokenContractsBaseURL + FungibleToken)
 	examples.Handle(err)
-	fmt.Println(string(ftCode))
 	deployFTScript, err := templates.CreateAccount(nil, ftCode)
 
 	deployContractTx := flow.NewTransaction().
@@ -137,8 +151,6 @@ func DeployFungibleAndFlowTokens() {
 	// Deploy the Flow Token contract
 	flowTokenCodeRaw, err := examples.DownloadFile(FungibleTokenContractsBaseURL + FlowToken)
 	examples.Handle(err)
-	fmt.Println(string(flowTokenCodeRaw))
-
 	flowTokenCode := strings.ReplaceAll(string(flowTokenCodeRaw), "0x01", "0x"+fungibleTokenAddress.Hex())
 
 	// Use the same root account key for simplicity
@@ -175,11 +187,8 @@ func DeployFungibleAndFlowTokens() {
 	fmt.Println("Flow Token Address:", flowTokenAddress.Hex())
 }
 
-func CreateAccountAndTransfer() {
-	// Connect to an access API (Emulator or Access node)
+func CreateAccountAndTransfer(flowClient *client.Client) {
 	ctx := context.Background()
-	flowClient, err := client.New(flowAccessAddress, grpc.WithInsecure())
-	examples.Handle(err)
 
 	myPrivateKey := examples.RandomPrivateKey()
 	myAcctKey := flow.NewAccountKey().
@@ -220,7 +229,6 @@ func CreateAccountAndTransfer() {
 
 	// Setup the account
 	accountSetupScript := GenerateSetupAccountScript(fungibleTokenAddress, flowTokenAddress)
-	fmt.Println(string(accountSetupScript))
 
 	accountSetupTx := flow.NewTransaction().
 		SetScript(accountSetupScript).
@@ -247,7 +255,6 @@ func CreateAccountAndTransfer() {
 
 	// Mint 10 tokens
 	mintScript := GenerateMintScript(fungibleTokenAddress, flowTokenAddress, myAddress)
-	fmt.Println(string(mintScript))
 	mintTx := flow.NewTransaction().
 		SetScript(mintScript).
 		SetProposalKey(myAddress, myAcctKey.ID, myAcctKey.SequenceNumber).
@@ -270,6 +277,48 @@ func CreateAccountAndTransfer() {
 	myAcctKey.SequenceNumber++
 }
 
+// GetEvents currently only gets the Deposit event,
+// List of possible events for the FlowToken contract: https://github.com/onflow/flow-ft/blob/master/contracts/FlowToken.cdc#L26-L41
+func GetEvents(flowClient *client.Client) {
+	ctx := context.Background()
+	results, err := flowClient.GetEventsForHeightRange(ctx, client.EventRangeQuery{
+		Type:        fmt.Sprintf("A.%s.FlowToken.Deposit", flowTokenAddress.Hex()),
+		StartHeight: 0,
+		EndHeight:   100,
+	})
+	examples.Handle(err)
+
+	fmt.Println("\nQuery for Deposit event:")
+	for _, block := range results {
+		for i, event := range block.Events {
+			fmt.Printf("Found event #%d in block #%d\n", i+1, block.Height)
+			fmt.Printf("Transaction ID: %s\n", event.TransactionID)
+			fmt.Printf("Event ID: %s\n", event.ID())
+			fmt.Println(event.String())
+		}
+	}
+}
+
+func GetTokenSupply(flowClient *client.Client) {
+	ctx := context.Background()
+	result, err := flowClient.ExecuteScriptAtLatestBlock(ctx, GenerateSupplyScript(flowTokenAddress))
+	examples.Handle(err)
+
+	supply := result.(cadence.UFix64)
+
+	fmt.Printf("Supply of Flow Tokens: %d\n", supply.ToGoValue())
+}
+
+func GetAccountBalance(flowClient *client.Client) {
+	ctx := context.Background()
+	result, err := flowClient.ExecuteScriptAtLatestBlock(ctx, GenerateBalanceScript(fungibleTokenAddress, flowTokenAddress, myAddress))
+	examples.Handle(err)
+
+	supply := result.(cadence.UFix64)
+
+	fmt.Printf("Balance of Flow Tokens for %s: %d\n", myAddress.Hex(), supply.ToGoValue())
+}
+
 func GenerateSetupAccountScript(ftAddr, flowToken flow.Address) []byte {
 	setupCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + SetupAccount)
 	examples.Handle(err)
@@ -283,6 +332,30 @@ func GenerateSetupAccountScript(ftAddr, flowToken flow.Address) []byte {
 // GenerateMintScript Creates a script that mints an 10 FTs
 func GenerateMintScript(ftAddr, flowToken, toAddr flow.Address) []byte {
 	mintCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + MintTokens)
+	examples.Handle(err)
+
+	withFTAddr := strings.ReplaceAll(string(mintCode), "0x01", "0x"+ftAddr.Hex())
+	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x02", "0x"+flowToken.Hex(), 1)
+	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x02", "0x"+toAddr.Hex(), 1)
+
+	return []byte(withToAddr)
+}
+
+// GenerateSupplyScript Creates a script that gets the supply of the token
+// Currently get the supply at the latest sealed block, possible to get at any sealed block
+func GenerateSupplyScript(flowToken flow.Address) []byte {
+	supplyCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + GetSupply)
+	examples.Handle(err)
+
+	withFlowTokenAddr := strings.Replace(string(supplyCode), "0x02", "0x"+flowToken.Hex(), 1)
+
+	return []byte(withFlowTokenAddr)
+}
+
+// GenerateBalanceScript Creates a script looks at the balance of an address
+// Currently get the balance at the latest sealed block, possible to get at any sealed block
+func GenerateBalanceScript(ftAddr, flowToken, toAddr flow.Address) []byte {
+	mintCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + GetBalance)
 	examples.Handle(err)
 
 	withFTAddr := strings.ReplaceAll(string(mintCode), "0x01", "0x"+ftAddr.Hex())

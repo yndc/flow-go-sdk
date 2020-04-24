@@ -44,3 +44,17 @@ GO111MODULE=on go run ./deploy_contract/main.go
 # Query events
 GO111MODULE=on go run ./query_events/main.go
 ```
+
+```shell script
+# Query events
+GO111MODULE=on go run ./fungible_token/main.go
+```
+For the fungible token script, there are a few configurable options via Environmental Variables:
+```
+FLOW_ACCESSADDRESS=
+FLOW_ROOTPRIVATEKEY=
+FLOW_FUNGIBLETOKENADDRESS=
+FLOW_FLOWTOKENADDRESS=
+ITERATIONS=
+```
+Leaving them blank will connect to a locally running emulator, with the preset private key, and deploy new fungible/flow token contracts

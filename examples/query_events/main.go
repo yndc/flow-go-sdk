@@ -83,7 +83,7 @@ func QueryEventsDemo() {
 	results, err := flowClient.GetEventsForHeightRange(ctx, client.EventRangeQuery{
 		Type:        "flow.AccountCreated",
 		StartHeight: 0,
-		EndHeight:   100,
+		EndHeight:   10,
 	})
 	examples.Handle(err)
 
