@@ -162,7 +162,7 @@ func (a *ecdsaAlgo) generatePrivateKey(seed []byte) (PrivateKey, error) {
 func (a *ecdsaAlgo) rawDecodePrivateKey(der []byte) (PrivateKey, error) {
 	Nlen := bitsToBytes((a.curve.Params().N).BitLen())
 	if len(der) != Nlen {
-		return nil, errors.New("raw private key is not valid")
+		return nil, fmt.Errorf("raw private key is not valid %d %d", len(der), Nlen)
 	}
 	var d big.Int
 	d.SetBytes(der)

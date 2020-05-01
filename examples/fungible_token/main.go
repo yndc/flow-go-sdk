@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -72,10 +71,6 @@ func main() {
 		// Default to emulator address
 		flowAccessAddress = "127.0.0.1:3569"
 	}
-	numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
-	if len(numberOfIterationsStr) == 0 {
-		numberOfIterations = 1
-	}
 
 	flowRootAccountKey := os.Getenv("FLOW_ROOTPRIVATEKEY")
 	flowClient, err := client.New(flowAccessAddress, grpc.WithInsecure())
@@ -102,13 +97,17 @@ func main() {
 		DeployFungibleAndFlowTokens(flowClient)
 	}
 
-	for i := 0; i < numberOfIterations; i++ {
-		CreateAccountAndTransfer(flowClient)
-	}
+	// numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
+	// if len(numberOfIterationsStr) == 0 {
+	// 	numberOfIterations = 1
+	// }
+	// for i := 0; i < numberOfIterations; i++ {
+	// 	CreateAccountAndTransfer(flowClient)
+	// }
 
-	GetEvents(flowClient)
-	GetTokenSupply(flowClient)
-	GetAccountBalance(flowClient)
+	// GetEvents(flowClient)
+	// GetTokenSupply(flowClient)
+	// GetAccountBalance(flowClient)
 }
 
 func DeployFungibleAndFlowTokens(flowClient *client.Client) {
@@ -140,6 +139,10 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	rootAcctKey.SequenceNumber++
 
 	for _, event := range deployContractTxResp.Events {
+		fmt.Printf("EVENT %+v\n", event)
+		fmt.Println(event.ID())
+		fmt.Println(event.Type)
+		fmt.Println(event.Value)
 		if event.Type == flow.EventAccountCreated {
 			accountCreatedEvent := flow.AccountCreatedEvent(event)
 			fungibleTokenAddress = accountCreatedEvent.Address()
@@ -178,6 +181,8 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	rootAcctKey.SequenceNumber++
 
 	for _, event := range deployFlowTokenContractTxResp.Events {
+		fmt.Printf("%+v\n", event)
+
 		if event.Type == flow.EventAccountCreated {
 			accountCreatedEvent := flow.AccountCreatedEvent(event)
 			flowTokenAddress = accountCreatedEvent.Address()
@@ -219,6 +224,8 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	rootAcctKey.SequenceNumber++
 
 	for _, event := range accountCreationTxRes.Events {
+		fmt.Println(event)
+
 		if event.Type == flow.EventAccountCreated {
 			accountCreatedEvent := flow.AccountCreatedEvent(event)
 			myAddress = accountCreatedEvent.Address()

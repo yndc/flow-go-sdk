@@ -38,7 +38,11 @@ type Transaction struct {
 
 // NewTransaction initializes and returns an empty transaction.
 func NewTransaction() *Transaction {
-	return &Transaction{}
+	id := Identifier{}
+	id[0] = 1
+	return &Transaction{
+		ReferenceBlockID: id,
+	}
 }
 
 // ID returns the canonical SHA3-256 hash of this transaction.

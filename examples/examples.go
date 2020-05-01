@@ -75,7 +75,8 @@ func RootAccount(flowClient *client.Client) (flow.Address, *flow.AccountKey, cry
 }
 
 func RootAccountWithKey(flowClient *client.Client, key string) (flow.Address, *flow.AccountKey, crypto.Signer) {
-	privateKey, _ := crypto.DecodePrivateKeyHex(crypto.ECDSA_P256, key)
+	privateKey, err := crypto.DecodePrivateKeyHex(crypto.ECDSA_P256, key)
+	Handle(err)
 	// root account always has address 0x01
 	addr := flow.HexToAddress("01")
 
@@ -83,6 +84,11 @@ func RootAccountWithKey(flowClient *client.Client, key string) (flow.Address, *f
 	Handle(err)
 
 	accountKey := acc.Keys[0]
+
+	// accountKey := flow.NewAccountKey().
+	// 	FromPrivateKey(privateKey).
+	// 	SetHashAlgo(crypto.SHA2_256).
+	// 	SetWeight(flow.AccountKeyWeightThreshold)
 
 	signer := crypto.NewInMemorySigner(privateKey, accountKey.HashAlgo)
 
@@ -163,6 +169,26 @@ func WaitForSeal(ctx context.Context, c *client.Client, id flow.Identifier) *flo
 
 	fmt.Println()
 	fmt.Printf("Transaction %s sealed\n", id)
+
+	return result
+}
+
+func WaitForFinalized(ctx context.Context, c *client.Client, id flow.Identifier) *flow.TransactionResult {
+	result, err := c.GetTransactionResult(ctx, id)
+	Handle(err)
+
+	fmt.Printf("Waiting for transaction %s to be finalized...\n", id)
+
+	for result.Status != flow.TransactionStatusFinalized {
+		time.Sleep(time.Second)
+		// fmt.Print(".")
+		fmt.Println(result)
+		result, err = c.GetTransactionResult(ctx, id)
+		Handle(err)
+	}
+
+	fmt.Println()
+	fmt.Printf("Transaction %s finalized\n", id)
 
 	return result
 }
