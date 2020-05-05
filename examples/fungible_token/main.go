@@ -132,7 +132,7 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	err = flowClient.SendTransaction(ctx, *deployContractTx)
 	examples.Handle(err)
 
-	deployContractTxResp := examples.WaitForSeal(ctx, flowClient, deployContractTx.ID())
+	deployContractTxResp := examples.WaitForFinalized(ctx, flowClient, deployContractTx.ID())
 	examples.Handle(deployContractTxResp.Error)
 
 	// Successful Tx, increment sequence number
@@ -174,7 +174,7 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	err = flowClient.SendTransaction(ctx, *deployFlowTokenContractTx)
 	examples.Handle(err)
 
-	deployFlowTokenContractTxResp := examples.WaitForSeal(ctx, flowClient, deployFlowTokenContractTx.ID())
+	deployFlowTokenContractTxResp := examples.WaitForFinalized(ctx, flowClient, deployFlowTokenContractTx.ID())
 	examples.Handle(deployFlowTokenContractTxResp.Error)
 
 	// Successful Tx, increment sequence number
@@ -217,7 +217,7 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	err = flowClient.SendTransaction(ctx, *createAccountTx)
 	examples.Handle(err)
 
-	accountCreationTxRes := examples.WaitForSeal(ctx, flowClient, createAccountTx.ID())
+	accountCreationTxRes := examples.WaitForFinalized(ctx, flowClient, createAccountTx.ID())
 	examples.Handle(accountCreationTxRes.Error)
 
 	// Successful Tx, increment sequence number
@@ -249,7 +249,7 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	err = flowClient.SendTransaction(ctx, *accountSetupTx)
 	examples.Handle(err)
 
-	accountSetupTxResp := examples.WaitForSeal(ctx, flowClient, accountSetupTx.ID())
+	accountSetupTxResp := examples.WaitForFinalized(ctx, flowClient, accountSetupTx.ID())
 	examples.Handle(accountSetupTxResp.Error)
 
 	// Successful Tx, increment sequence number
@@ -277,7 +277,7 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	err = flowClient.SendTransaction(ctx, *mintTx)
 	examples.Handle(err)
 
-	mintTxResp := examples.WaitForSeal(ctx, flowClient, mintTx.ID())
+	mintTxResp := examples.WaitForFinalized(ctx, flowClient, mintTx.ID())
 	examples.Handle(mintTxResp.Error)
 
 	// Successful Tx, increment sequence number

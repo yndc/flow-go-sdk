@@ -159,7 +159,6 @@ func WaitForSeal(ctx context.Context, c *client.Client, id flow.Identifier) *flo
 	Handle(err)
 
 	fmt.Printf("Waiting for transaction %s to be sealed...\n", id)
-
 	for result.Status != flow.TransactionStatusSealed {
 		time.Sleep(time.Second)
 		fmt.Print(".")
@@ -179,10 +178,9 @@ func WaitForFinalized(ctx context.Context, c *client.Client, id flow.Identifier)
 
 	fmt.Printf("Waiting for transaction %s to be finalized...\n", id)
 
-	for result.Status != flow.TransactionStatusFinalized {
+	for result.Status != flow.TransactionStatusFinalized && result.Status != flow.TransactionStatusSealed {
 		time.Sleep(time.Second)
-		// fmt.Print(".")
-		fmt.Println(result)
+		fmt.Print(".")
 		result, err = c.GetTransactionResult(ctx, id)
 		Handle(err)
 	}
