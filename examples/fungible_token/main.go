@@ -20,7 +20,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -56,19 +58,24 @@ const (
 	TransferTokens = "transfer_tokens.cdc"
 )
 
+const (
+	KeysJSON = "keys.json"
+)
+
 var (
 	flowAccessAddress     = os.Getenv("FLOW_ACCESSADDRESS")
 	numberOfIterationsStr = os.Getenv("ITERATIONS")
 
 	fungibleTokenAddress flow.Address
 	flowTokenAddress     flow.Address
-	myAddress            flow.Address // Latest created account
 
 	rootAcctAddr flow.Address
 	rootAcctKey  *flow.AccountKey
 	rootSigner   crypto.Signer
 
-	signers = map[flow.Address]crypto.InMemorySigner{}
+	accounts    = map[flow.Address]*flow.AccountKey{}
+	privateKeys = map[string][]byte{}
+	signers     = map[flow.Address]crypto.InMemorySigner{}
 
 	finalizedBlock *flow.BlockHeader
 )
@@ -109,24 +116,52 @@ func main() {
 
 	numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
 	if len(numberOfIterationsStr) == 0 {
-		numberOfIterations = 50
+		numberOfIterations = 10
 	}
 
-	accounts := map[flow.Address]*flow.AccountKey{}
-	fmt.Println("Creating a batch of accounts")
-	// createAccountWG := sync.WaitGroup{}
-	for i := 0; i < numberOfIterations; i++ {
-		// createAccountWG.Add(1)
-		// go func() {
-		finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
-		examples.Handle(err)
-		addr, key := CreateAccountAndTransfer(flowClient)
-		accounts[addr] = key
-		// 	createAccountWG.Done()
+	b, _ := ioutil.ReadFile(KeysJSON)
+	if len(b) > 0 {
+		err := json.Unmarshal(b, &privateKeys)
+		if err == nil {
+			for addrString, key := range privateKeys {
+				pk, err := crypto.DecodePrivateKey(crypto.ECDSA_P256, key)
+				examples.Handle(err)
+				addr := flow.HexToAddress(addrString)
+				acc, err := flowClient.GetAccount(context.Background(), addr)
+				examples.Handle(err)
+				accountKey := acc.Keys[0]
 
-		// }()
+				accounts[addr] = accountKey
+				signer := crypto.NewInMemorySigner(pk, accountKey.HashAlgo)
+				signers[addr] = signer
+			}
+		}
 	}
-	// createAccountWG.Wait()
+
+	if len(accounts) == 0 {
+		fmt.Println("Creating a batch of accounts")
+		// createAccountWG := sync.WaitGroup{}
+		for i := 0; i < numberOfIterations; i++ {
+			// createAccountWG.Add(1)
+			// go func() {
+			finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
+			examples.Handle(err)
+			addr, key := CreateAccountAndTransfer(flowClient)
+			accounts[addr] = key
+			// 	createAccountWG.Done()
+
+			// }()
+		}
+
+		keysFile, err := json.MarshalIndent(privateKeys, "", " ")
+		if err != nil {
+			fmt.Println("Could not save account keys", err)
+		} else {
+			_ = ioutil.WriteFile(KeysJSON, keysFile, 0644)
+		}
+
+	}
+
 	for {
 		fmt.Println("Transfering tokens")
 		transferWG := sync.WaitGroup{}
@@ -156,6 +191,7 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	ftCode, err := examples.DownloadFile(FungibleTokenContractsBaseURL + FungibleToken)
 	examples.Handle(err)
 	deployFTScript, err := templates.CreateAccount(nil, ftCode)
+	examples.Handle(err)
 
 	deployContractTx := flow.NewTransaction().
 		SetReferenceBlockID(finalizedBlock.ID).
@@ -195,10 +231,11 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	// Deploy the Flow Token contract
 	flowTokenCodeRaw, err := examples.DownloadFile(FungibleTokenContractsBaseURL + FlowToken)
 	examples.Handle(err)
-	flowTokenCode := strings.ReplaceAll(string(flowTokenCodeRaw), "0x01", "0x"+fungibleTokenAddress.Hex())
+	flowTokenCode := strings.ReplaceAll(string(flowTokenCodeRaw), "0x02", "0x"+fungibleTokenAddress.Hex())
 
 	// Use the same root account key for simplicity
 	deployFlowTokenScript, err := templates.CreateAccount([]*flow.AccountKey{rootAcctKey}, []byte(flowTokenCode))
+	examples.Handle(err)
 
 	deployFlowTokenContractTx := flow.NewTransaction().
 		SetReferenceBlockID(finalizedBlock.ID).
@@ -277,8 +314,9 @@ func CreateAccountAndTransfer(flowClient *client.Client) (flow.Address, *flow.Ac
 
 	fmt.Println("My Address:", accountAddress.Hex())
 
-	// Save signer
+	// Save key and signer
 	signers[accountAddress] = mySigner
+	privateKeys[accountAddress.String()] = myPrivateKey.Encode()
 
 	// Setup the account
 	accountSetupScript := GenerateSetupAccountScript(fungibleTokenAddress, flowTokenAddress)
@@ -355,7 +393,11 @@ func Transfer10Tokens(flowClient *client.Client, fromAddr, toAddr flow.Address, 
 	examples.Handle(err)
 
 	transferTxResp := examples.WaitForFinalized(ctx, flowClient, transferTx.ID())
-	examples.Handle(transferTxResp.Error)
+	if transferTxResp.Error != nil {
+		fmt.Println(transferTxResp.Error)
+		// Do not fail, so that we can continue loop
+		return
+	}
 
 	// Successful Tx, increment sequence number
 	fromKey.SequenceNumber++
@@ -393,7 +435,7 @@ func GetTokenSupply(flowClient *client.Client) {
 	fmt.Printf("Supply of Flow Tokens: %d\n", supply.ToGoValue())
 }
 
-func GetAccountBalance(flowClient *client.Client) {
+func GetAccountBalance(flowClient *client.Client, myAddress flow.Address) {
 	ctx := context.Background()
 	result, err := flowClient.ExecuteScriptAtLatestBlock(ctx, GenerateBalanceScript(fungibleTokenAddress, flowTokenAddress, myAddress))
 	examples.Handle(err)

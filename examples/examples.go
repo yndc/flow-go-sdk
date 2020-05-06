@@ -187,7 +187,9 @@ func WaitForFinalized(ctx context.Context, c *client.Client, id flow.Identifier)
 			fmt.Print("x")
 			errCount++
 			if errCount >= 10 {
-				Handle(err)
+				return &flow.TransactionResult{
+					Error: err,
+				}
 			}
 		} else {
 			fmt.Print(".")
