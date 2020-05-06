@@ -81,7 +81,9 @@ func RootAccountWithKey(flowClient *client.Client, key string) (flow.Address, *f
 	addr := flow.HexToAddress("01")
 
 	acc, err := flowClient.GetAccount(context.Background(), addr)
+
 	Handle(err)
+	fmt.Println(acc.Keys[0])
 
 	accountKey := acc.Keys[0]
 
@@ -174,15 +176,23 @@ func WaitForSeal(ctx context.Context, c *client.Client, id flow.Identifier) *flo
 
 func WaitForFinalized(ctx context.Context, c *client.Client, id flow.Identifier) *flow.TransactionResult {
 	result, err := c.GetTransactionResult(ctx, id)
-	Handle(err)
+	// Handle(err)
 
 	fmt.Printf("Waiting for transaction %s to be finalized...\n", id)
-
-	for result.Status != flow.TransactionStatusFinalized && result.Status != flow.TransactionStatusSealed {
+	errCount := 0
+	for result == nil || (result.Status != flow.TransactionStatusFinalized && result.Status != flow.TransactionStatusSealed) {
 		time.Sleep(time.Second)
-		fmt.Print(".")
 		result, err = c.GetTransactionResult(ctx, id)
-		Handle(err)
+		if err != nil {
+			fmt.Print("x")
+			errCount++
+			if errCount >= 10 {
+				Handle(err)
+			}
+		} else {
+			fmt.Print(".")
+		}
+		// Handle(err)
 	}
 
 	fmt.Println()

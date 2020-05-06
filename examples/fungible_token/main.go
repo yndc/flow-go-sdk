@@ -22,7 +22,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc"
 
@@ -47,10 +49,11 @@ const (
 	// More transactions listed here: https://github.com/onflow/flow-ft/tree/master/transactions
 	FungibleTokenTransactionsBaseURL = "https://raw.githubusercontent.com/onflow/flow-ft/master/transactions/"
 
-	SetupAccount = "setup_account.cdc"
-	MintTokens   = "mint_tokens.cdc"
-	GetSupply    = "get_supply.cdc"
-	GetBalance   = "get_balance.cdc"
+	SetupAccount   = "setup_account.cdc"
+	MintTokens     = "mint_tokens.cdc"
+	GetSupply      = "get_supply.cdc"
+	GetBalance     = "get_balance.cdc"
+	TransferTokens = "transfer_tokens.cdc"
 )
 
 var (
@@ -64,6 +67,10 @@ var (
 	rootAcctAddr flow.Address
 	rootAcctKey  *flow.AccountKey
 	rootSigner   crypto.Signer
+
+	signers = map[flow.Address]crypto.InMemorySigner{}
+
+	finalizedBlock *flow.BlockHeader
 )
 
 func main() {
@@ -92,18 +99,51 @@ func main() {
 		flowTokenAddress = flow.HexToAddress(existingFlowTokenAddress)
 	}
 
+	finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
+	examples.Handle(err)
+
 	if len(existingFungibleTokenAddress) == 0 || len(existingFlowTokenAddress) == 0 {
 		// Deploy the token contracts
 		DeployFungibleAndFlowTokens(flowClient)
 	}
 
-	// numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
-	// if len(numberOfIterationsStr) == 0 {
-	// 	numberOfIterations = 1
-	// }
-	// for i := 0; i < numberOfIterations; i++ {
-	// 	CreateAccountAndTransfer(flowClient)
-	// }
+	numberOfIterations, _ := strconv.Atoi(numberOfIterationsStr)
+	if len(numberOfIterationsStr) == 0 {
+		numberOfIterations = 50
+	}
+
+	accounts := map[flow.Address]*flow.AccountKey{}
+	fmt.Println("Creating a batch of accounts")
+	// createAccountWG := sync.WaitGroup{}
+	for i := 0; i < numberOfIterations; i++ {
+		// createAccountWG.Add(1)
+		// go func() {
+		finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
+		examples.Handle(err)
+		addr, key := CreateAccountAndTransfer(flowClient)
+		accounts[addr] = key
+		// 	createAccountWG.Done()
+
+		// }()
+	}
+	// createAccountWG.Wait()
+	for {
+		fmt.Println("Transfering tokens")
+		transferWG := sync.WaitGroup{}
+		prevAddr := flowTokenAddress
+		for accountAddr, accountKey := range accounts {
+			transferWG.Add(1)
+			go func(fromAddr, toAddr flow.Address, accKey *flow.AccountKey) {
+				finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
+				examples.Handle(err)
+				Transfer10Tokens(flowClient, fromAddr, toAddr, accKey)
+				transferWG.Done()
+			}(accountAddr, prevAddr, accountKey)
+			prevAddr = accountAddr
+		}
+
+		transferWG.Wait()
+	}
 
 	// GetEvents(flowClient)
 	// GetTokenSupply(flowClient)
@@ -118,6 +158,7 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	deployFTScript, err := templates.CreateAccount(nil, ftCode)
 
 	deployContractTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
 		SetScript(deployFTScript).
 		SetProposalKey(rootAcctAddr, rootAcctKey.ID, rootAcctKey.SequenceNumber).
 		SetPayer(rootAcctAddr)
@@ -160,6 +201,7 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	deployFlowTokenScript, err := templates.CreateAccount([]*flow.AccountKey{rootAcctKey}, []byte(flowTokenCode))
 
 	deployFlowTokenContractTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
 		SetScript(deployFlowTokenScript).
 		SetProposalKey(rootAcctAddr, rootAcctKey.ID, rootAcctKey.SequenceNumber).
 		SetPayer(rootAcctAddr)
@@ -192,21 +234,22 @@ func DeployFungibleAndFlowTokens(flowClient *client.Client) {
 	fmt.Println("Flow Token Address:", flowTokenAddress.Hex())
 }
 
-func CreateAccountAndTransfer(flowClient *client.Client) {
+func CreateAccountAndTransfer(flowClient *client.Client) (flow.Address, *flow.AccountKey) {
 	ctx := context.Background()
 
 	myPrivateKey := examples.RandomPrivateKey()
-	myAcctKey := flow.NewAccountKey().
+	accountKey := flow.NewAccountKey().
 		FromPrivateKey(myPrivateKey).
 		SetHashAlgo(crypto.SHA3_256).
 		SetWeight(flow.AccountKeyWeightThreshold)
-	mySigner := crypto.NewInMemorySigner(myPrivateKey, myAcctKey.HashAlgo)
+	mySigner := crypto.NewInMemorySigner(myPrivateKey, accountKey.HashAlgo)
 
 	// Generate an account creation script
-	createAccountScript, err := templates.CreateAccount([]*flow.AccountKey{myAcctKey}, nil)
+	createAccountScript, err := templates.CreateAccount([]*flow.AccountKey{accountKey}, nil)
 	examples.Handle(err)
 
 	createAccountTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
 		SetScript(createAccountScript).
 		SetProposalKey(rootAcctAddr, rootAcctKey.ID, rootAcctKey.SequenceNumber).
 		SetPayer(rootAcctAddr)
@@ -222,28 +265,32 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 
 	// Successful Tx, increment sequence number
 	rootAcctKey.SequenceNumber++
-
+	accountAddress := flow.Address{}
 	for _, event := range accountCreationTxRes.Events {
 		fmt.Println(event)
 
 		if event.Type == flow.EventAccountCreated {
 			accountCreatedEvent := flow.AccountCreatedEvent(event)
-			myAddress = accountCreatedEvent.Address()
+			accountAddress = accountCreatedEvent.Address()
 		}
 	}
 
-	fmt.Println("My Address:", myAddress.Hex())
+	fmt.Println("My Address:", accountAddress.Hex())
+
+	// Save signer
+	signers[accountAddress] = mySigner
 
 	// Setup the account
 	accountSetupScript := GenerateSetupAccountScript(fungibleTokenAddress, flowTokenAddress)
 
 	accountSetupTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
 		SetScript(accountSetupScript).
-		SetProposalKey(myAddress, myAcctKey.ID, myAcctKey.SequenceNumber).
-		SetPayer(myAddress).
-		AddAuthorizer(myAddress)
+		SetProposalKey(accountAddress, accountKey.ID, accountKey.SequenceNumber).
+		SetPayer(accountAddress).
+		AddAuthorizer(accountAddress)
 
-	err = accountSetupTx.SignEnvelope(myAddress, myAcctKey.ID, mySigner)
+	err = accountSetupTx.SignEnvelope(accountAddress, accountKey.ID, mySigner)
 	examples.Handle(err)
 
 	err = flowClient.SendTransaction(ctx, *accountSetupTx)
@@ -253,7 +300,7 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	examples.Handle(accountSetupTxResp.Error)
 
 	// Successful Tx, increment sequence number
-	myAcctKey.SequenceNumber++
+	accountKey.SequenceNumber++
 
 	// Mint to the new account
 	flowTokenAcc, err := flowClient.GetAccount(context.Background(), flowTokenAddress)
@@ -261,17 +308,18 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	flowTokenAccKey := flowTokenAcc.Keys[0]
 
 	// Mint 10 tokens
-	mintScript := GenerateMintScript(fungibleTokenAddress, flowTokenAddress, myAddress)
+	mintScript := GenerateMintScript(fungibleTokenAddress, flowTokenAddress, accountAddress)
 	mintTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
 		SetScript(mintScript).
-		SetProposalKey(myAddress, myAcctKey.ID, myAcctKey.SequenceNumber).
-		SetPayer(myAddress).
+		SetProposalKey(accountAddress, accountKey.ID, accountKey.SequenceNumber).
+		SetPayer(accountAddress).
 		AddAuthorizer(flowTokenAddress)
 
 	err = mintTx.SignPayload(flowTokenAddress, flowTokenAccKey.ID, rootSigner)
 	examples.Handle(err)
 
-	err = mintTx.SignEnvelope(myAddress, myAcctKey.ID, mySigner)
+	err = mintTx.SignEnvelope(accountAddress, accountKey.ID, mySigner)
 	examples.Handle(err)
 
 	err = flowClient.SendTransaction(ctx, *mintTx)
@@ -281,7 +329,36 @@ func CreateAccountAndTransfer(flowClient *client.Client) {
 	examples.Handle(mintTxResp.Error)
 
 	// Successful Tx, increment sequence number
-	myAcctKey.SequenceNumber++
+	accountKey.SequenceNumber++
+	return accountAddress, accountKey
+}
+
+func Transfer10Tokens(flowClient *client.Client, fromAddr, toAddr flow.Address, fromKey *flow.AccountKey) {
+	ctx := context.Background()
+
+	// Transfer 10 tokens
+	transferScript := GenerateTransferScript(fungibleTokenAddress, flowTokenAddress, toAddr)
+	transferTx := flow.NewTransaction().
+		SetReferenceBlockID(finalizedBlock.ID).
+		SetScript(transferScript).
+		SetProposalKey(fromAddr, fromKey.ID, fromKey.SequenceNumber).
+		SetPayer(fromAddr).
+		AddAuthorizer(fromAddr)
+
+	// err = transferTx.SignPayload(flowTokenAddress, flowTokenAccKey.ID, rootSigner)
+	// examples.Handle(err)
+
+	err := transferTx.SignEnvelope(fromAddr, fromKey.ID, signers[fromAddr])
+	examples.Handle(err)
+
+	err = flowClient.SendTransaction(ctx, *transferTx)
+	examples.Handle(err)
+
+	transferTxResp := examples.WaitForFinalized(ctx, flowClient, transferTx.ID())
+	examples.Handle(transferTxResp.Error)
+
+	// Successful Tx, increment sequence number
+	fromKey.SequenceNumber++
 }
 
 // GetEvents currently only gets the Deposit event,
@@ -330,8 +407,8 @@ func GenerateSetupAccountScript(ftAddr, flowToken flow.Address) []byte {
 	setupCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + SetupAccount)
 	examples.Handle(err)
 
-	withFTAddr := strings.ReplaceAll(string(setupCode), "0x01", "0x"+ftAddr.Hex())
-	withFlowTokenAddr := strings.ReplaceAll(string(withFTAddr), "0x02", "0x"+flowToken.Hex())
+	withFTAddr := strings.ReplaceAll(string(setupCode), "0x02", "0x"+ftAddr.Hex())
+	withFlowTokenAddr := strings.ReplaceAll(string(withFTAddr), "0x03", "0x"+flowToken.Hex())
 
 	return []byte(withFlowTokenAddr)
 }
@@ -341,11 +418,27 @@ func GenerateMintScript(ftAddr, flowToken, toAddr flow.Address) []byte {
 	mintCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + MintTokens)
 	examples.Handle(err)
 
-	withFTAddr := strings.ReplaceAll(string(mintCode), "0x01", "0x"+ftAddr.Hex())
-	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x02", "0x"+flowToken.Hex(), 1)
-	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x02", "0x"+toAddr.Hex(), 1)
+	withFTAddr := strings.ReplaceAll(string(mintCode), "0x02", "0x"+ftAddr.Hex())
+	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x03", "0x"+flowToken.Hex(), 1)
+	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x03", "0x"+toAddr.Hex(), 1)
 
-	return []byte(withToAddr)
+	withAmount := strings.Replace(string(withToAddr), "10.0", "1.0", 1)
+
+	return []byte(withAmount)
+}
+
+// GenerateTransferScript Creates a script that mints an 10 FTs
+func GenerateTransferScript(ftAddr, flowToken, toAddr flow.Address) []byte {
+	mintCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + TransferTokens)
+	examples.Handle(err)
+
+	withFTAddr := strings.ReplaceAll(string(mintCode), "0x02", "0x"+ftAddr.Hex())
+	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x03", "0x"+flowToken.Hex(), 1)
+	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x04", "0x"+toAddr.Hex(), 1)
+
+	withAmount := strings.Replace(string(withToAddr), "10.0", "0.01", 1)
+
+	return []byte(withAmount)
 }
 
 // GenerateSupplyScript Creates a script that gets the supply of the token
@@ -354,7 +447,7 @@ func GenerateSupplyScript(flowToken flow.Address) []byte {
 	supplyCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + GetSupply)
 	examples.Handle(err)
 
-	withFlowTokenAddr := strings.Replace(string(supplyCode), "0x02", "0x"+flowToken.Hex(), 1)
+	withFlowTokenAddr := strings.Replace(string(supplyCode), "0x03", "0x"+flowToken.Hex(), 1)
 
 	return []byte(withFlowTokenAddr)
 }
@@ -365,9 +458,9 @@ func GenerateBalanceScript(ftAddr, flowToken, toAddr flow.Address) []byte {
 	mintCode, err := examples.DownloadFile(FungibleTokenTransactionsBaseURL + GetBalance)
 	examples.Handle(err)
 
-	withFTAddr := strings.ReplaceAll(string(mintCode), "0x01", "0x"+ftAddr.Hex())
-	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x02", "0x"+flowToken.Hex(), 1)
-	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x02", "0x"+toAddr.Hex(), 1)
+	withFTAddr := strings.ReplaceAll(string(mintCode), "0x02", "0x"+ftAddr.Hex())
+	withFlowTokenAddr := strings.Replace(string(withFTAddr), "0x03", "0x"+flowToken.Hex(), 1)
+	withToAddr := strings.Replace(string(withFlowTokenAddr), "0x03", "0x"+toAddr.Hex(), 1)
 
 	return []byte(withToAddr)
 }
