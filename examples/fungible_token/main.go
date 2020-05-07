@@ -109,6 +109,8 @@ func main() {
 	finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
 	examples.Handle(err)
 
+	fmt.Println("Reference Block", finalizedBlock.ID)
+
 	if len(existingFungibleTokenAddress) == 0 || len(existingFlowTokenAddress) == 0 {
 		// Deploy the token contracts
 		DeployFungibleAndFlowTokens(flowClient)
@@ -166,11 +168,12 @@ func main() {
 		fmt.Println("Transfering tokens")
 		transferWG := sync.WaitGroup{}
 		prevAddr := flowTokenAddress
+		finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
+		examples.Handle(err)
+
 		for accountAddr, accountKey := range accounts {
 			transferWG.Add(1)
 			go func(fromAddr, toAddr flow.Address, accKey *flow.AccountKey) {
-				finalizedBlock, err = flowClient.GetLatestBlockHeader(context.Background(), false)
-				examples.Handle(err)
 				Transfer10Tokens(flowClient, fromAddr, toAddr, accKey)
 				transferWG.Done()
 			}(accountAddr, prevAddr, accountKey)
@@ -393,14 +396,15 @@ func Transfer10Tokens(flowClient *client.Client, fromAddr, toAddr flow.Address, 
 	examples.Handle(err)
 
 	transferTxResp := examples.WaitForFinalized(ctx, flowClient, transferTx.ID())
+
+	// Successful Tx, increment sequence number
+	fromKey.SequenceNumber++
+
 	if transferTxResp.Error != nil {
 		fmt.Println(transferTxResp.Error)
 		// Do not fail, so that we can continue loop
 		return
 	}
-
-	// Successful Tx, increment sequence number
-	fromKey.SequenceNumber++
 }
 
 // GetEvents currently only gets the Deposit event,
