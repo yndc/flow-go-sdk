@@ -21,12 +21,36 @@ package convert_test
 import (
 	"testing"
 
+	"github.com/onflow/cadence"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/onflow/flow-go-sdk"
 	"github.com/onflow/flow-go-sdk/client/convert"
 	"github.com/onflow/flow-go-sdk/test"
 )
+
+func TestConvert_Account(t *testing.T) {
+	accountA := test.AccountGenerator().New()
+
+	msg := convert.AccountToMessage(*accountA)
+
+	accountB, err := convert.MessageToAccount(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, *accountA, accountB)
+}
+
+func TestConvert_AccountKey(t *testing.T) {
+	keyA := test.AccountKeyGenerator().New()
+
+	msg := convert.AccountKeyToMessage(keyA)
+
+	keyB, err := convert.MessageToAccountKey(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, keyA, keyB)
+}
 
 func TestConvert_Block(t *testing.T) {
 	blockA := test.BlockGenerator().New()
@@ -34,9 +58,42 @@ func TestConvert_Block(t *testing.T) {
 	msg := convert.BlockToMessage(*blockA)
 
 	blockB, err := convert.MessageToBlock(msg)
+	require.NoError(t, err)
 
-	assert.NoError(t, err)
 	assert.Equal(t, *blockA, blockB)
+}
+
+func TestConvert_BlockHeader(t *testing.T) {
+	headerA := test.BlockHeaderGenerator().New()
+
+	msg := convert.BlockHeaderToMessage(headerA)
+
+	headerB, err := convert.MessageToBlockHeader(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, headerA, headerB)
+}
+
+func TestConvert_CadenceValue(t *testing.T) {
+	t.Run("Valid value", func(t *testing.T) {
+		valueA := cadence.NewInt(42)
+
+		msg, err := convert.CadenceValueToMessage(valueA)
+		require.NoError(t, err)
+
+		valueB, err := convert.MessageToCadenceValue(msg)
+		require.NoError(t, err)
+
+		assert.Equal(t, valueA, valueB)
+	})
+
+	t.Run("Invalid message", func(t *testing.T) {
+		msg := []byte("invalid JSON-CDC bytes")
+
+		value, err := convert.MessageToCadenceValue(msg)
+		assert.Error(t, err)
+		assert.Nil(t, value)
+	})
 }
 
 func TestConvert_Collection(t *testing.T) {
@@ -45,20 +102,37 @@ func TestConvert_Collection(t *testing.T) {
 	msg := convert.CollectionToMessage(*colA)
 
 	colB, err := convert.MessageToCollection(msg)
+	require.NoError(t, err)
 
-	assert.NoError(t, err)
 	assert.Equal(t, *colA, colB)
 }
 
-func TestConvert_Transaction(t *testing.T) {
-	txA := test.TransactionGenerator().New()
+func TestConvert_CollectionGuarantee(t *testing.T) {
+	cgA := test.CollectionGuaranteeGenerator().New()
 
-	msg := convert.TransactionToMessage(*txA)
+	msg := convert.CollectionGuaranteeToMessage(*cgA)
 
-	txB, err := convert.MessageToTransaction(msg)
+	cgB, err := convert.MessageToCollectionGuarantee(msg)
+	require.NoError(t, err)
 
-	assert.NoError(t, err)
-	assert.Equal(t, txA.ID(), txB.ID())
+	assert.Equal(t, *cgA, cgB)
+}
+
+func TestConvert_CollectionGuarantees(t *testing.T) {
+	cgs := test.CollectionGuaranteeGenerator()
+
+	cgsA := []*flow.CollectionGuarantee{
+		cgs.New(),
+		cgs.New(),
+		cgs.New(),
+	}
+
+	msg := convert.CollectionGuaranteesToMessages(cgsA)
+
+	cgsB, err := convert.MessagesToCollectionGuarantees(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, cgsA, cgsB)
 }
 
 func TestConvert_Event(t *testing.T) {
@@ -71,4 +145,50 @@ func TestConvert_Event(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, eventA, eventB)
+}
+
+func TestConvert_Identifier(t *testing.T) {
+	idA := test.IdentifierGenerator().New()
+
+	msg := convert.IdentifierToMessage(idA)
+	idB := convert.MessageToIdentifier(msg)
+
+	assert.Equal(t, idA, idB)
+}
+
+func TestConvert_Identifiers(t *testing.T) {
+	ids := test.IdentifierGenerator()
+
+	idsA := []flow.Identifier{
+		ids.New(),
+		ids.New(),
+		ids.New(),
+	}
+
+	msg := convert.IdentifiersToMessages(idsA)
+	idsB := convert.MessagesToIdentifiers(msg)
+
+	assert.Equal(t, idsA, idsB)
+}
+
+func TestConvert_Transaction(t *testing.T) {
+	txA := test.TransactionGenerator().New()
+
+	msg := convert.TransactionToMessage(*txA)
+
+	txB, err := convert.MessageToTransaction(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, txA.ID(), txB.ID())
+}
+
+func TestConvert_TransactionResult(t *testing.T) {
+	resultA := test.TransactionResultGenerator().New()
+
+	msg, err := convert.TransactionResultToMessage(resultA)
+
+	resultB, err := convert.MessageToTransactionResult(msg)
+	require.NoError(t, err)
+
+	assert.Equal(t, resultA, resultB)
 }

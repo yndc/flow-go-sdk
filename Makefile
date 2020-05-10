@@ -1,5 +1,3 @@
-# Disable go sum database lookup for private repos
-GOPRIVATE := github.com/onflow/*
 # Ensure go bin path is in path (especially for CI)
 PATH := $(PATH):$(GOPATH)/bin
 
@@ -14,6 +12,10 @@ install-tools:
 .PHONY: test
 test:
 	GO111MODULE=on go test -coverprofile=cover.out ./...
+
+.PHONY: coverage
+coverage: test
+	go tool cover -html=cover.out
 
 .PHONY: generate-mocks
 generate-mocks:
