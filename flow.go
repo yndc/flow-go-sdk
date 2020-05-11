@@ -20,6 +20,7 @@ package flow
 
 import (
 	"encoding/hex"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/rlp"
 
@@ -61,8 +62,22 @@ func HashToID(hash []byte) Identifier {
 // DefaultHasher is the default hasher used by Flow.
 var DefaultHasher crypto.Hasher
 
+type defaultHasher struct {
+	crypto.Hasher
+	sync.Mutex
+}
+
+func (h *defaultHasher) ComputeHash(b []byte) crypto.Hash {
+	h.Lock()
+	defer h.Unlock()
+	return h.ComputeHash(b)
+}
+
 func init() {
-	DefaultHasher = crypto.NewSHA3_256()
+	DefaultHasher = &defaultHasher{
+		crypto.NewSHA3_256(),
+		sync.Mutex{},
+	}
 }
 
 func rlpEncode(v interface{}) ([]byte, error) {
