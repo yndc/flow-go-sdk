@@ -70,7 +70,7 @@ type defaultHasher struct {
 func (h *defaultHasher) ComputeHash(b []byte) crypto.Hash {
 	h.Lock()
 	defer h.Unlock()
-	return h.ComputeHash(b)
+	return h.Hasher.ComputeHash(b)
 }
 
 func init() {
