@@ -248,12 +248,12 @@ func (c *Client) GetTransaction(ctx context.Context, txID flow.Identifier) (*flo
 }
 
 // GetTransactionResult gets the result of a transaction.
-func (c *Client) GetTransactionResult(ctx context.Context, txID flow.Identifier) (*flow.TransactionResult, error) {
+func (c *Client) GetTransactionResult(ctx context.Context, txID flow.Identifier, opts ...grpc.CallOption) (*flow.TransactionResult, error) {
 	req := &access.GetTransactionRequest{
 		Id: txID.Bytes(),
 	}
 
-	res, err := c.rpcClient.GetTransactionResult(ctx, req)
+	res, err := c.rpcClient.GetTransactionResult(ctx, req, opts...)
 	if err != nil {
 		return nil, newRPCError(err)
 	}
